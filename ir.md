@@ -102,8 +102,8 @@ BRANCH_TARGET ::= IDENT ( '(' BRANCH_PARAM (',' BRANCH_PARAM)* ')' )?
 
 TERM ::=
     'br' BRANCH_TARGET
-    'brif' REGISTER BRANCH_TARGET BRANCH_TARGET # if REGISTER, branch to BRANCH_TARGET, else BRANCH_TARGET
-    'ret' (REGISTER)?
+    'brif' VALUE BRANCH_TARGET BRANCH_TARGET # if VALUE, branch to BRANCH_TARGET, else BRANCH_TARGET
+    'ret' (VALUE)?
 
 ```
 
@@ -115,7 +115,7 @@ For instance, the `add` instruction can take two `i32` operands, or two `f32` op
 Note that even though the BNF form implies that the destination register is not required, it is required for all instructions that yield values.
 
 ```
-INST ::= ('%' IDENT '=')? ARITH | MEM | CMP | CALL | VALUE
+INST ::= (REGISTER '=')? (ARITH | MEM | CMP | CALL | CONV | SELECT)
 ```
 
 Values are the building blocks of all instructions. A value is either a register, a constant, or a global value.
@@ -152,14 +152,14 @@ Memory instructions are used to load and store values from memory.
 Stores are annotated with the type of the value being stored, loads are annontated with the type of the value being loaded.
 Both expect a register that contains a pointer to an addressable memory location. We may support a ptr with an offset in the future.
 
-- `load.(i8|i32|i64|f32|f64) ptr`
+- `load.(i8|i32|i64|f32|f64) VALUE`
     - Returns the value at the address pointed to by the pointer.
-- `store.(i8|i32|i64|f32|f64) %a, ptr`
+- `store.(i8|i32|i64|f32|f64) VALUE, VALUE`
 
 We also support stack allocation via the `alloc` instruction. 
 These are annotated with a type that is used to determine the size of the allocation, and the number of elements.
 
-- `alloc.(i8|i32|i64|f32|f64) i32`
+- `alloc.(i8|i32|i64|f32|f64) NUMBER`
     - This always returns a pointer to the start of the stack allocation.
     - We guarantee that this will be suitably aligned for the type.
 
@@ -225,7 +225,7 @@ If a function returns a value, it is a type error not to assign the value to a r
 We return to BNF form to describe the call instruction.
 
 ```llvmir
-CALL ::= 'call' GLOBAL '(' (REGISTER (',' REGISTER)*)? ')'
+CALL ::= 'call' GLOBAL '(' (VALUE (',' VALUE)*)? ')'
 ```
 
 We currently do not support tail call instructions, or variadic function calls.
