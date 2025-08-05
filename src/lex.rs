@@ -123,7 +123,7 @@ pub struct Lexer {
 impl Lexer {
     pub fn new(input: &str) -> Self {
         let chars: Vec<char> = input.chars().collect();
-        let current_char = chars.get(0).copied();
+        let current_char = chars.first().copied();
 
         Lexer {
             input: chars,
@@ -212,7 +212,7 @@ impl Lexer {
         }
 
         // Check for float
-        if self.current_char == Some('.') && self.peek().map_or(false, |c| c.is_ascii_digit()) {
+        if self.current_char == Some('.') && self.peek().is_some_and(|c| c.is_ascii_digit()) {
             result.push('.');
             self.advance();
 
@@ -246,12 +246,10 @@ impl Lexer {
             }
 
             Token::Float(result.parse().unwrap_or(0.0))
+        } else if is_negative {
+            Token::Int(result.parse().unwrap_or(0))
         } else {
-            if is_negative {
-                Token::Int(result.parse().unwrap_or(0))
-            } else {
-                Token::Number(result.parse().unwrap_or(0))
-            }
+            Token::Number(result.parse().unwrap_or(0))
         }
     }
 
@@ -348,61 +346,61 @@ impl Lexer {
         self.skip_whitespace();
 
         match self.current_char {
-            None => return Ok(Token::Eof),
+            None => Ok(Token::Eof),
             Some('\n') => {
                 self.advance();
-                return Ok(Token::Newline);
+                Ok(Token::Newline)
             }
             Some('(') => {
                 self.advance();
-                return Ok(Token::LeftParen);
+                Ok(Token::LeftParen)
             }
             Some(')') => {
                 self.advance();
-                return Ok(Token::RightParen);
+                Ok(Token::RightParen)
             }
             Some('{') => {
                 self.advance();
-                return Ok(Token::LeftBrace);
+                Ok(Token::LeftBrace)
             }
             Some('}') => {
                 self.advance();
-                return Ok(Token::RightBrace);
+                Ok(Token::RightBrace)
             }
             Some('[') => {
                 self.advance();
-                return Ok(Token::LeftBracket);
+                Ok(Token::LeftBracket)
             }
             Some(']') => {
                 self.advance();
-                return Ok(Token::RightBracket);
+                Ok(Token::RightBracket)
             }
             Some(',') => {
                 self.advance();
-                return Ok(Token::Comma);
+                Ok(Token::Comma)
             }
             Some(':') => {
                 self.advance();
-                return Ok(Token::Colon);
+                Ok(Token::Colon)
             }
             Some(';') => {
                 self.advance();
-                return Ok(Token::Semicolon);
+                Ok(Token::Semicolon)
             }
             Some('.') => {
                 self.advance();
-                return Ok(Token::Dot);
+                Ok(Token::Dot)
             }
             Some('=') => {
                 self.advance();
-                return Ok(Token::Equals);
+                Ok(Token::Equals)
             }
             Some('-') => {
                 if self.peek() == Some('>') {
                     self.advance();
                     self.advance();
-                    return Ok(Token::Arrow);
-                } else if self.peek().map_or(false, |c| c.is_ascii_digit()) {
+                    Ok(Token::Arrow)
+                } else if self.peek().is_some_and(|c| c.is_ascii_digit()) {
                     return Ok(self.read_number());
                 } else {
                     return Err("Unexpected character: -".to_string());
@@ -411,35 +409,35 @@ impl Lexer {
             Some('@') => {
                 self.advance();
                 let ident = self.read_identifier();
-                return Ok(Token::Global(ident));
+                Ok(Token::Global(ident))
             }
             Some('%') => {
                 self.advance();
                 let ident = self.read_identifier();
-                return Ok(Token::Register(ident));
+                Ok(Token::Register(ident))
             }
             Some('^') => {
                 self.advance();
                 let ident = self.read_identifier();
-                return Ok(Token::UserType(ident));
+                Ok(Token::UserType(ident))
             }
             Some('"') => {
                 let string_val = self.read_string()?;
-                return Ok(Token::String(string_val));
+                Ok(Token::String(string_val))
             }
             Some('#') => {
                 let comment = self.read_comment();
-                return Ok(Token::Comment(comment));
+                Ok(Token::Comment(comment))
             }
             Some(ch) if ch.is_ascii_digit() => {
-                return Ok(self.read_number());
+                Ok(self.read_number())
             }
             Some(ch) if ch.is_alphabetic() || ch == '_' => {
                 let ident = self.read_identifier();
-                return Ok(self.keyword_or_ident(&ident));
+                Ok(self.keyword_or_ident(&ident))
             }
             Some(ch) => {
-                return Err(format!("Unexpected character: {}", ch));
+                Err(format!("Unexpected character: {}", ch))
             }
         }
     }
