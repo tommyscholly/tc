@@ -285,7 +285,7 @@ FN_DEF ::= 'fn' GLOBAL '(' (BLOCK_FN_PARAM (',' BLOCK_FN_PARAM)*)? ')' ('->' BAS
 
 EXTERN_FN_DEF ::= 'declare' 'fn' GLOBAL '(' (BASE_TYPE (',' BASE_TYPE)*)? ')' ('->' BASE_TYPE)?
 
-BLOCK ::= IDENT ('(' (BLOCK_FN_PARAM (',' BLOCK_FN_PARAM)*)? ')')? ':' INST* TERMINATOR
+BLOCK ::= IDENT ('(' (BLOCK_FN_PARAM (',' BLOCK_FN_PARAM)*)? ')')? ':' INST* TERM
 
 INST ::= (REGISTER '=')? (ARITH | MEM | CMP | CALL | CONV | SELECT)
 
@@ -312,7 +312,7 @@ CONV_OP ::= 'sext' | 'zext' | 'trunc' | 'itof' | 'uitof' | 'ftoi'
 
 CALL ::= 'call' GLOBAL '(' (VALUE (',' VALUE)*)? ')'
 
-TERMINATOR ::= 'br' BRANCH_TARGET
+TERM ::= 'br' BRANCH_TARGET
              | 'brif' VALUE BRANCH_TARGET BRANCH_TARGET
              | 'ret' VALUE?
 

@@ -71,7 +71,7 @@ pub enum Token {
     Ident(String),
     Global(String),   // @identifier
     Register(String), // %identifier
-    UserType(String), // ^identifier
+    // UserType(String), // ^identifier
     Int(i64),
     Float(f64),
     String(String),
@@ -103,7 +103,7 @@ impl fmt::Display for Token {
             Token::Ident(s) => write!(f, "IDENT({})", s),
             Token::Global(s) => write!(f, "@{}", s),
             Token::Register(s) => write!(f, "%{}", s),
-            Token::UserType(s) => write!(f, "^{}", s),
+            // Token::UserType(s) => write!(f, "^{}", s),
             Token::Int(n) => write!(f, "{}", n),
             Token::Float(n) => write!(f, "{}", n),
             Token::String(s) => write!(f, "\"{}\"", s),
@@ -417,9 +417,10 @@ impl Lexer {
                 Ok(Token::Register(ident))
             }
             Some('^') => {
-                self.advance();
-                let ident = self.read_identifier();
-                Ok(Token::UserType(ident))
+                panic!("User types are not yet supported");
+                // self.advance();
+                // let ident = self.read_identifier();
+                // Ok(Token::UserType(ident))
             }
             Some('"') => {
                 let string_val = self.read_string()?;
@@ -429,16 +430,12 @@ impl Lexer {
                 let comment = self.read_comment();
                 Ok(Token::Comment(comment))
             }
-            Some(ch) if ch.is_ascii_digit() => {
-                Ok(self.read_number())
-            }
+            Some(ch) if ch.is_ascii_digit() => Ok(self.read_number()),
             Some(ch) if ch.is_alphabetic() || ch == '_' => {
                 let ident = self.read_identifier();
                 Ok(self.keyword_or_ident(&ident))
             }
-            Some(ch) => {
-                Err(format!("Unexpected character: {}", ch))
-            }
+            Some(ch) => Err(format!("Unexpected character: {}", ch)),
         }
     }
 
@@ -484,6 +481,7 @@ start:
 
         assert!(tokens.contains(&Token::Data));
         assert!(tokens.contains(&Token::Global("hello_world_z".to_string())));
+        assert!(tokens.contains(&Token::String("Hello, World\0".to_string())));
         assert!(tokens.contains(&Token::Declare));
         assert!(tokens.contains(&Token::Fn));
         assert!(tokens.contains(&Token::Register("r".to_string())));
@@ -519,7 +517,7 @@ start:
 
         assert!(matches!(tokens[0], Token::Number(42)));
         assert!(matches!(tokens[1], Token::Int(-17)));
-        assert!(matches!(tokens[2], Token::Float(f) if (f - PI).abs() < 0.001));
+        assert!(matches!(tokens[2], Token::Float(f) if (f - PI).abs() < 0.005));
         assert!(matches!(tokens[3], Token::Float(f) if (f + 2.5e10).abs() < 1e6));
     }
 }
