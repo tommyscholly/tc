@@ -354,7 +354,7 @@ impl Parser {
     }
 
     fn type_annotation(&mut self) -> Result<Option<BaseType>> {
-        if let Token::Colon = self.next().ok_or(anyhow!("Unexpected end of file"))? {
+        if let Token::Dot = self.next().ok_or(anyhow!("Unexpected end of file"))? {
             let ty = self.type_decl()?;
             Ok(Some(ty.into_base_type()))
         } else {
@@ -364,7 +364,7 @@ impl Parser {
 
     fn operands(&mut self, num_operands: usize) -> Result<Vec<Value>> {
         let mut operands = Vec::new();
-        for _ in 0..num_operands {
+        for i in 0..num_operands {
             let tok = self.next().ok_or(anyhow!("Unexpected end of file"))?;
             if let Token::Register(reg) = tok {
                 operands.push(Value::Register(reg.clone()));
@@ -372,6 +372,10 @@ impl Parser {
                 operands.push(Value::Int(num));
             } else {
                 return Err(anyhow!("Expected register or number, got {:?}", tok));
+            }
+
+            if i + 1 < num_operands {
+                self.expect_token(Token::Comma)?;
             }
         }
 
@@ -543,20 +547,18 @@ impl Parser {
 
     fn insts(&mut self) -> Result<Vec<Instruction>> {
         let mut instructions = Vec::new();
-        loop {
-            if let Ok(inst) = self.inst() {
-                instructions.push(inst);
-            } else {
-                break;
-            }
+        while let Ok(inst) = self.inst() {
+            instructions.push(inst);
         }
 
         Ok(instructions)
     }
 
     fn inst(&mut self) -> Result<Instruction> {
-        match self.next().ok_or(anyhow!("Unexpected end of file"))? {
+        match self.peek().ok_or(anyhow!("Unexpected end of file"))? {
             Token::Register(reg) => {
+                let reg = reg.clone();
+                self.advance();
                 let Token::Equals = self.next().ok_or(anyhow!("Unexpected end of file"))? else {
                     return Err(anyhow!(
                         "Expected '=' after register, got {:?}",
@@ -564,7 +566,8 @@ impl Parser {
                     ));
                 };
 
-                let tok_peek = self.peek().ok_or(anyhow!("Unexpected end of file"))?;
+                let tok = self.next().ok_or(anyhow!("Unexpected end of file"))?;
+                let tok_peek = &tok;
                 if let Ok(op) = ArithOp::from_token(tok_peek) {
                     let ty = self.type_annotation()?;
                     let operands = self.operands(op.num_operands())?;
@@ -615,7 +618,7 @@ impl Parser {
                     ));
                 }
             }
-            _ => todo!(),
+            _ => Err(anyhow!("Unhandled")),
         }
     }
 
@@ -629,7 +632,7 @@ impl Parser {
                     Ok(Terminator::Return(None))
                 }
             }
-            _ => unimplemented!(),
+            t => Err(anyhow!("Expected terminator, got {:?}", t)),
         }
     }
 }
@@ -725,7 +728,22 @@ entry(%a: i32, %b: i32):
             assert_eq!(block.params.len(), 2);
             assert_eq!(block.params[0], ("a".to_string(), BaseType::I32));
             assert_eq!(block.params[1], ("b".to_string(), BaseType::I32));
-            assert_eq!(block.instructions.len(), 0);
+            assert_eq!(
+                block.instructions[0],
+                Instruction::Arith {
+                    dest: "sum".to_string(),
+                    op: ArithOp::Add,
+                    ty: BaseType::I32,
+                    operands: vec![
+                        Value::Register("a".to_string()),
+                        Value::Register("b".to_string())
+                    ]
+                }
+            );
+            assert_eq!(
+                block.terminator,
+                Terminator::Return(Some(Value::Register("sum".to_string())))
+            );
         } else {
             panic!("Expected function definition");
         }
