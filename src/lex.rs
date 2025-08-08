@@ -246,10 +246,8 @@ impl Lexer {
             }
 
             Token::Float(result.parse().unwrap_or(0.0))
-        } else if is_negative {
-            Token::Int(result.parse().unwrap_or(0))
         } else {
-            Token::Number(result.parse().unwrap_or(0))
+            Token::Int(result.parse().unwrap_or(0))
         }
     }
 
@@ -512,7 +510,7 @@ start:
         let mut lexer = Lexer::new(input);
         let tokens = lexer.tokenize().unwrap();
 
-        assert!(matches!(tokens[0], Token::Number(42)));
+        assert!(matches!(tokens[0], Token::Int(42)));
         assert!(matches!(tokens[1], Token::Int(-17)));
         assert!(matches!(tokens[2], Token::Float(f) if (f - PI).abs() < 0.005));
         assert!(matches!(tokens[3], Token::Float(f) if (f + 2.5e10).abs() < 1e6));

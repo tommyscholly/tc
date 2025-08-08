@@ -1,3 +1,5 @@
+use std::collections::HashMap;
+
 use crate::lex::{Lexer, Token};
 use anyhow::{Result, anyhow};
 
@@ -38,7 +40,7 @@ pub enum Value {
     Global(String),
     Int(i64),
     Float(f64),
-    Number(u64),
+    // Number(u64),
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -353,6 +355,17 @@ impl Parser {
         }
     }
 
+    fn expect_ident(&mut self) -> Result<String> {
+        let actual = self.peek().ok_or(anyhow!("Unexpected end of file"))?;
+        if let Token::Ident(ident) = actual {
+            let ident = ident.clone();
+            self.advance();
+            Ok(ident)
+        } else {
+            Err(anyhow!("Expected identifier, got {:?}", actual))
+        }
+    }
+
     fn type_annotation(&mut self) -> Result<Option<BaseType>> {
         if let Token::Dot = self.next().ok_or(anyhow!("Unexpected end of file"))? {
             let ty = self.type_decl()?;
@@ -431,15 +444,16 @@ impl Parser {
                     _ => return Err(anyhow!("Expected base type, got {:?}", inner_ty)),
                 };
                 self.expect_token(Token::Semicolon)?;
-                let Token::Number(size) = self.peek().ok_or(anyhow!("Unexpected end of file"))?
-                else {
+                let Token::Int(size) = self.peek().ok_or(anyhow!("Unexpected end of file"))? else {
                     return Err(anyhow!("Expected number, got {:?}", self.peek()));
                 };
+                assert!(*size >= 0);
                 let size = *size; // required to drop the immutable borrow
                 self.advance();
                 self.expect_token(Token::RightBracket)?;
                 // we return here cause the advance call at the bottom will advance too far
-                return Ok(Type::Array(inner_base_ty, size));
+                // @SAFETY: we checked that size is >= 0
+                return Ok(Type::Array(inner_base_ty, size as u64));
             }
             _ => return Err(anyhow!("Expected type, got {:?}", self.peek())),
         };
@@ -508,12 +522,15 @@ impl Parser {
         self.expect_token(Token::LeftBrace);
         let blocks = self.blocks(&return_type)?;
         self.expect_token(Token::RightBrace);
-        Ok(Function {
+
+        let fn_ = Function {
             name,
             params,
             return_type,
             blocks,
-        })
+        };
+        println!("{:?}", fn_);
+        Ok(fn_)
     }
 
     fn blocks(&mut self, return_type: &Option<BaseType>) -> Result<Vec<Block>> {
@@ -535,6 +552,7 @@ impl Parser {
         let params = self.block_fn_param()?;
         self.expect_token(Token::Colon);
         let instructions = self.insts()?;
+        println!("\n insts: {:?}", instructions);
         let terminator = self.terminator(return_type)?;
 
         Ok(Block {
@@ -547,11 +565,51 @@ impl Parser {
 
     fn insts(&mut self) -> Result<Vec<Instruction>> {
         let mut instructions = Vec::new();
-        while let Ok(inst) = self.inst() {
-            instructions.push(inst);
+        loop {
+            let inst = self.inst();
+            if let Ok(inst) = inst {
+                instructions.push(inst);
+            } else {
+                println!("inst: {:?}", inst);
+                break;
+            }
         }
 
         Ok(instructions)
+    }
+
+    fn call_operands(&mut self) -> Result<Vec<Value>> {
+        self.expect_token(Token::LeftParen)?;
+
+        let mut call_ops = Vec::new();
+        while !matches!(self.peek(), Some(Token::RightParen)) {
+            let value = self.operands(1)?.pop().unwrap();
+            println!("{:?}", value);
+            call_ops.push(value);
+            if matches!(self.peek(), Some(Token::Comma)) {
+                self.advance();
+            } else if let Token::RightParen =
+                self.next().ok_or(anyhow!("Unexpected end of file"))?
+            {
+                break;
+            } else {
+                return Err(anyhow!("Expected ',' or ')', got {:?}", self.peek()));
+            }
+        }
+
+        Ok(call_ops)
+    }
+
+    fn call(&mut self, dest: Option<String>) -> Result<Instruction> {
+        self.expect_token(Token::Call)?;
+        let function = self.expect_global()?;
+        let call_ops = self.call_operands()?;
+
+        Ok(Instruction::Call {
+            dest,
+            function: function.clone(),
+            args: call_ops,
+        })
     }
 
     fn inst(&mut self) -> Result<Instruction> {
@@ -566,9 +624,9 @@ impl Parser {
                     ));
                 };
 
-                let tok = self.next().ok_or(anyhow!("Unexpected end of file"))?;
-                let tok_peek = &tok;
+                let tok_peek = self.peek().ok_or(anyhow!("Unexpected end of file"))?;
                 if let Ok(op) = ArithOp::from_token(tok_peek) {
+                    self.advance();
                     let ty = self.type_annotation()?;
                     let operands = self.operands(op.num_operands())?;
 
@@ -580,6 +638,7 @@ impl Parser {
                         operands,
                     });
                 } else if let Ok(op) = MemOp::from_token(tok_peek) {
+                    self.advance();
                     let ty = self.type_annotation()?;
                     let operands = self.operands(op.num_operands())?;
 
@@ -590,9 +649,11 @@ impl Parser {
                         operands,
                     });
                 } else if let Ok(op) = CmpOp::from_token(tok_peek) {
+                    self.advance();
                     let ty = self.type_annotation()?;
-                    let left = self.operands(1)?.pop().unwrap();
-                    let right = self.operands(1)?.pop().unwrap();
+                    let mut left_right = self.operands(2)?;
+                    let right = left_right.pop().unwrap();
+                    let left = left_right.pop().unwrap();
 
                     return Ok(Instruction::Compare {
                         dest: reg,
@@ -602,6 +663,7 @@ impl Parser {
                         right,
                     });
                 } else if let Ok(op) = ConvOp::from_token(tok_peek) {
+                    self.advance();
                     let ty = self.type_annotation()?;
                     let operand = self.operands(1)?.pop().unwrap();
 
@@ -612,14 +674,27 @@ impl Parser {
                         operand,
                     });
                 } else {
-                    return Err(anyhow!(
-                        "Expected arithmetic, memory, compare, or convert operation, got {:?}",
-                        tok_peek
-                    ));
+                    // avoid immutable + mutable borrow
+                    let tok_peek = tok_peek.clone();
+                    if let Ok(call) = self.call(Some(reg)) {
+                        return Ok(call);
+                    } else {
+                        return Err(anyhow!(
+                            "Expected arithmetic, memory, compare, or convert operation, got {:?}",
+                            tok_peek
+                        ));
+                    }
                 }
             }
+            Token::Call => self.call(None),
             _ => Err(anyhow!("Unhandled")),
         }
+    }
+
+    fn branch_target(&mut self) -> Result<BranchTarget> {
+        let block = self.expect_ident()?;
+        let args = self.call_operands()?;
+        Ok(BranchTarget { block, args })
     }
 
     fn terminator(&mut self, ret_type: &Option<BaseType>) -> Result<Terminator> {
@@ -631,6 +706,18 @@ impl Parser {
                 } else {
                     Ok(Terminator::Return(None))
                 }
+            }
+            Token::Br => {
+                let target = self.branch_target()?;
+                Ok(Terminator::Branch(target))
+            }
+            Token::Brif => {
+                let condition = self.operands(1)?.pop().unwrap();
+                self.expect_token(Token::Comma)?;
+                let true_target = self.branch_target()?;
+                self.expect_token(Token::Comma)?;
+                let false_target = self.branch_target()?;
+                Ok(Terminator::BranchIf(condition, true_target, false_target))
             }
             t => Err(anyhow!("Expected terminator, got {:?}", t)),
         }
@@ -811,41 +898,6 @@ start:
         }
     }
 
-    #[ignore]
-    #[test]
-    fn test_parse_arithmetic() {
-        let input = r#"
-fn @test() -> i32 {
-start:
-    %result = add.i32 %a, %b
-    ret %result
-}
-"#;
-
-        let lexer = Lexer::new(input);
-        let mut parser = Parser::new(lexer).unwrap();
-        let program = parser.parse().unwrap();
-
-        if let Definition::Function(func) = &program.definitions[0] {
-            let block = &func.blocks[0];
-            if let Instruction::Arith {
-                dest,
-                op,
-                ty,
-                operands,
-            } = &block.instructions[0]
-            {
-                assert_eq!(dest, "result");
-                assert_eq!(*op, ArithOp::Add);
-                assert_eq!(*ty, BaseType::I32);
-                assert_eq!(operands.len(), 2);
-            } else {
-                panic!("Expected arithmetic instruction");
-            }
-        }
-    }
-
-    #[ignore]
     #[test]
     fn test_two_functions() {
         let input = r#"
@@ -929,7 +981,7 @@ start:
                 assert_eq!(dest, "val_a");
                 assert_eq!(*op, ArithOp::Add);
                 assert_eq!(*ty, BaseType::I32);
-                assert_eq!(operands, &vec![Value::Number(10), Value::Number(20)]);
+                assert_eq!(operands, &vec![Value::Int(10), Value::Int(20)]);
             } else {
                 panic!("Expected add.i32 instruction for val_a");
             }
@@ -944,7 +996,7 @@ start:
                 assert_eq!(dest, "val_b");
                 assert_eq!(*op, ArithOp::Add);
                 assert_eq!(*ty, BaseType::I32);
-                assert_eq!(operands, &vec![Value::Number(5), Value::Number(7)]);
+                assert_eq!(operands, &vec![Value::Int(5), Value::Int(7)]);
             } else {
                 panic!("Expected add.i32 instruction for val_b");
             }
@@ -974,7 +1026,6 @@ start:
         }
     }
 
-    #[ignore]
     #[test]
     fn test_block_without_terminator() {
         let input = r#"
@@ -990,5 +1041,134 @@ start:
         let poss_err = parser.parse();
         assert!(poss_err.is_err()); // TODO: improve this error message, as we aren't getting
         // 'Expected terminator', but rather we're erroring on the '}'
+    }
+
+    #[test]
+    fn test_multi_block_fn() {
+        let input = r#"
+fn @main() -> i32 {
+start:
+    %a = add.i32 0, 1
+    br loop(%a)
+loop(%i: i32):
+    %b = add.i32 %i, 1
+    %cond = eq.i32 %i, 10
+    brif %cond, end(%b), loop(%b)
+end(%i: i32):
+    ret %i
+}
+"#;
+
+        let lexer = Lexer::new(input);
+        let mut parser = Parser::new(lexer).unwrap();
+        let program = parser.parse().unwrap();
+
+        assert_eq!(program.definitions.len(), 1);
+
+        if let Definition::Function(func) = &program.definitions[0] {
+            assert_eq!(func.name, "main");
+            assert!(func.params.is_empty());
+            assert_eq!(func.return_type, Some(BaseType::I32));
+            assert_eq!(func.blocks.len(), 3);
+
+            let start_block = &func.blocks[0];
+            assert_eq!(start_block.name, "start");
+            assert!(start_block.params.is_empty());
+            assert_eq!(start_block.instructions.len(), 1);
+
+            if let Instruction::Arith {
+                dest,
+                op,
+                ty,
+                operands,
+            } = &start_block.instructions[0]
+            {
+                assert_eq!(dest, "a");
+                assert_eq!(*op, ArithOp::Add);
+                assert_eq!(*ty, BaseType::I32);
+                assert_eq!(operands, &vec![Value::Int(0), Value::Int(1)]);
+            } else {
+                panic!("Expected arithmetic instruction in start block");
+            }
+
+            if let Terminator::Branch(target) = &start_block.terminator {
+                assert_eq!(target.block, "loop");
+                assert_eq!(target.args.len(), 1);
+                assert_eq!(target.args[0], Value::Register("a".to_string()));
+            } else {
+                panic!("Expected branch terminator in start block");
+            }
+
+            let loop_block = &func.blocks[1];
+            assert_eq!(loop_block.name, "loop");
+            assert_eq!(loop_block.params.len(), 1);
+            assert_eq!(loop_block.params[0], ("i".to_string(), BaseType::I32));
+            assert_eq!(loop_block.instructions.len(), 2);
+
+            if let Instruction::Arith {
+                dest,
+                op,
+                ty,
+                operands,
+            } = &loop_block.instructions[0]
+            {
+                assert_eq!(dest, "b");
+                assert_eq!(*op, ArithOp::Add);
+                assert_eq!(*ty, BaseType::I32);
+                assert_eq!(
+                    operands,
+                    &vec![Value::Register("i".to_string()), Value::Int(1)]
+                );
+            } else {
+                panic!("Expected arithmetic instruction for %b in loop block");
+            }
+
+            if let Instruction::Compare {
+                dest,
+                op,
+                ty,
+                left,
+                right,
+            } = &loop_block.instructions[1]
+            {
+                assert_eq!(dest, "cond");
+                assert_eq!(*op, CmpOp::Eq);
+                assert_eq!(*ty, BaseType::I32);
+                assert_eq!(*left, Value::Register("i".to_string()));
+                assert_eq!(*right, Value::Int(10));
+            } else {
+                panic!("Expected compare instruction for %cond in loop block");
+            }
+
+            if let Terminator::BranchIf(condition, true_target, false_target) =
+                &loop_block.terminator
+            {
+                assert_eq!(*condition, Value::Register("cond".to_string()));
+
+                assert_eq!(true_target.block, "end");
+                assert_eq!(true_target.args.len(), 1);
+                assert_eq!(true_target.args[0], Value::Register("b".to_string()));
+
+                assert_eq!(false_target.block, "loop");
+                assert_eq!(false_target.args.len(), 1);
+                assert_eq!(false_target.args[0], Value::Register("b".to_string()));
+            } else {
+                panic!("Expected conditional branch terminator in loop block");
+            }
+
+            let end_block = &func.blocks[2];
+            assert_eq!(end_block.name, "end");
+            assert_eq!(end_block.params.len(), 1);
+            assert_eq!(end_block.params[0], ("i".to_string(), BaseType::I32));
+            assert!(end_block.instructions.is_empty());
+
+            if let Terminator::Return(Some(val)) = &end_block.terminator {
+                assert_eq!(*val, Value::Register("i".to_string()));
+            } else {
+                panic!("Expected return terminator in end block");
+            }
+        } else {
+            panic!("Expected function definition");
+        }
     }
 }
