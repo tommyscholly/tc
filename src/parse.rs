@@ -448,6 +448,8 @@ impl Parser {
                 operands.push(Value::Register(reg.clone()));
             } else if let Token::Int(num) = tok {
                 operands.push(Value::Int(num));
+            } else if let Token::Global(global) = tok {
+                operands.push(Value::Global(global.clone()));
             } else {
                 return Err(anyhow!("Expected register or number, got {:?}", tok));
             }
@@ -464,7 +466,7 @@ impl Parser {
         let definition = match self.peek().ok_or(anyhow!("Unexpected end of file"))? {
             Token::Data => Definition::Data(self.data_def()?),
             Token::Fn => Definition::Function(self.fn_def()?),
-            // Token::Extern => self.extern_function()?.into(),
+            Token::Declare => Definition::ExternFunction(self.extern_function()?),
             _ => {
                 return Err(anyhow!(
                     "Expected definition, got {:?}, at position {}",
@@ -538,6 +540,49 @@ impl Parser {
         let value = value.clone();
         self.advance();
         Ok(DataDef { name, ty, value })
+    }
+
+    fn type_params(&mut self) -> Result<Vec<BaseType>> {
+        let mut params = Vec::new();
+        if let Token::LeftParen = self.peek().ok_or(anyhow!("Unexpected end of file"))? {
+            self.advance();
+            while let Ok(ty) = self.type_decl() {
+                params.push(ty.into_base_type());
+                if let Token::Comma = self.peek().ok_or(anyhow!("Unexpected end of file"))? {
+                    self.advance();
+                } else {
+                    break;
+                };
+            }
+            match self.peek().ok_or(anyhow!("Unexpected end of file"))? {
+                Token::RightParen => {
+                    self.advance();
+                }
+                _ => return Err(anyhow!("Expected right paren, got {:?}", self.peek())),
+            }
+        }
+        Ok(params)
+    }
+
+    fn extern_function(&mut self) -> Result<ExternFunction> {
+        self.expect_token(Token::Declare)?;
+        self.expect_token(Token::Fn)?;
+        let name = self.expect_global()?;
+        let param_types = self.type_params()?;
+
+        let return_type =
+            if let Token::Arrow = self.peek().ok_or(anyhow!("Unexpected end of file"))? {
+                self.expect_token(Token::Arrow)?;
+                Some(self.type_decl()?.into_base_type())
+            } else {
+                None
+            };
+
+        Ok(ExternFunction {
+            name,
+            param_types,
+            return_type,
+        })
     }
 
     fn block_fn_param(&mut self) -> Result<Vec<(String, BaseType)>> {
@@ -897,7 +942,6 @@ entry(%a: i32, %b: i32):
         }
     }
 
-    #[ignore]
     #[test]
     fn test_parse_hello_world() {
         let input = r#"
