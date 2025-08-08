@@ -1,0 +1,9 @@
+data @global_val: i32 = 100
+
+fn @test_mixed(%param: i32) -> i32 {
+start:
+    %sum1 = add.i32 %param, 42
+    %sum2 = add.i32 %sum1, @global_val
+    %result = mul.i32 %sum2, 2
+    ret %result
+}

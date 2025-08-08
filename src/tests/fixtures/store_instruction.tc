@@ -1,0 +1,7 @@
+fn @test_store(%value: i32) -> i32 {
+start:
+    %ptr = alloc.i32 1
+    store.i32 %ptr, %value
+    %loaded = load.i32 %ptr
+    ret %loaded
+}

@@ -1,0 +1,5 @@
+fn @test_select(%cond: i32, %a: i32, %b: i32) -> i32 {
+start:
+    %result = select.i32 %cond, %a, %b
+    ret %result
+}

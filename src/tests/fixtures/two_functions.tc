@@ -1,0 +1,11 @@
+fn @add_one(%a: i32) -> i32 {
+start:
+    %result = add.i32 %a, 1
+    ret %result
+}
+
+fn @main() -> i32 {
+start:
+    %x = call @add_one(5)
+    ret %x
+}

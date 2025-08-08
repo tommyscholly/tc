@@ -1,0 +1,8 @@
+fn @test_shifts(%value: i32, %amount: i32) -> i32 {
+start:
+    %left = lsl.i32 %value, %amount
+    %logical_right = lsr.i32 %left, %amount
+    %arith_right = asr.i32 %value, %amount
+    %result = add.i32 %logical_right, %arith_right
+    ret %result
+}

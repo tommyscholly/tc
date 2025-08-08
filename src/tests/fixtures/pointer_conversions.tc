@@ -1,0 +1,11 @@
+fn @test_pointer_conversions(%ptr: ptr, %int_val: i64) -> ptr {
+start:
+    %ptr_as_int = ptoi.i64 %ptr
+    %modified_int = add.i64 %ptr_as_int, %int_val
+    %new_ptr = itop.i64 %modified_int
+
+    %bitcast_ptr = bitcast.ptr %int_val
+    %bitcast_int = bitcast.i64 %bitcast_ptr
+
+    ret %new_ptr
+}
