@@ -1,0 +1,17 @@
+fn @test_signed_unsigned(%a: i32, %b: i32) -> i32 {
+start:
+    %signed_div = div.i32 %a, %b
+    %unsigned_div = udiv.i32 %a, %b
+    %signed_rem = rem.i32 %a, %b
+    %unsigned_rem = urem.i32 %a, %b
+
+    %signed_lt = lt.i32 %a, %b
+    %unsigned_lt = ult.i32 %a, %b
+    %signed_gt = gt.i32 %a, %b
+    %unsigned_gt = ugt.i32 %a, %b
+
+    %div_sum = add.i32 %signed_div, %unsigned_div
+    %rem_sum = add.i32 %signed_rem, %unsigned_rem
+    %result = add.i32 %div_sum, %rem_sum
+    ret %result
+}

@@ -1,0 +1,10 @@
+fn @test_float_conversions(%int_val: i32, %float_val: f32) -> f64 {
+start:
+    %promoted = fpromote.f64 %float_val
+    %int_to_float = itof.f32 %int_val
+    %uint_to_float = uitof.f64 %int_val
+    %float_to_int = ftoi.i32 %promoted
+    %demoted = fdemote.f32 %promoted
+    %final_promote = fpromote.f64 %demoted
+    ret %final_promote
+}

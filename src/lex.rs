@@ -452,60 +452,91 @@ impl Lexer {
 
 #[cfg(test)]
 mod tests {
+    use super::*;
+    use crate::tests::test_utils::{TestFixture, error_utils, lex_utils};
     use std::f64::consts::PI;
 
-    use super::*;
-
     #[test]
-    fn test_hello_world() {
-        let input = r#"
-data @hello_world_z: [i8; 14] = "Hello, World\00"
-
-declare fn @puts(ptr) -> i32
-
-fn @main() -> i32 {
-start:
-    %r = call @puts(@hello_world_z) # call puts
-    ret %r
-}
-"#;
-
-        let mut lexer = Lexer::new(input);
-        let tokens = lexer.tokenize().unwrap();
-
-        println!("{:?}", tokens);
-        assert!(tokens.contains(&Token::Data));
-        assert!(tokens.contains(&Token::Global("hello_world_z".to_string())));
-        assert!(tokens.contains(&Token::String("Hello, World\0".to_string())));
-        assert!(tokens.contains(&Token::Declare));
-        assert!(tokens.contains(&Token::Fn));
-        assert!(tokens.contains(&Token::Register("r".to_string())));
-        assert!(tokens.contains(&Token::Call));
+    fn test_all_fixtures_tokenize() {
+        let fixtures = TestFixture::all();
+        for fixture in &fixtures {
+            lex_utils::assert_tokenizes(fixture);
+        }
     }
 
     #[test]
-    fn test_arithmetic() {
-        let input = "%result = add.i32 %a, %b";
-        let mut lexer = Lexer::new(input);
-        let tokens = lexer.tokenize().unwrap();
-
-        let expected = vec![
-            Token::Register("result".to_string()),
-            Token::Equals,
-            Token::Add,
-            Token::Dot,
-            Token::I32,
-            Token::Register("a".to_string()),
-            Token::Comma,
-            Token::Register("b".to_string()),
-            Token::Eof,
-        ];
-
-        assert_eq!(tokens, expected);
+    fn test_hello_world_tokens() {
+        let fixture = TestFixture::load("hello_world");
+        lex_utils::assert_contains_tokens(
+            &fixture,
+            &[
+                Token::Data,
+                Token::Global("hello_world_z".to_string()),
+                Token::String("Hello, World\0".to_string()),
+                Token::Declare,
+                Token::Fn,
+                Token::Global("puts".to_string()),
+                Token::Global("main".to_string()),
+                Token::Register("r".to_string()),
+                Token::Call,
+            ],
+        );
     }
 
     #[test]
-    fn test_numbers() {
+    fn test_arithmetic_tokens() {
+        let fixture = TestFixture::load("fn_with_entry");
+        lex_utils::assert_contains_tokens(
+            &fixture,
+            &[
+                Token::Register("result".to_string()),
+                Token::Equals,
+                Token::Add,
+                Token::Dot,
+                Token::I32,
+            ],
+        );
+    }
+
+    #[test]
+    fn test_shift_operation_tokens() {
+        let fixture = TestFixture::load("shift_ops");
+        lex_utils::assert_contains_tokens(&fixture, &[Token::Lsl, Token::Lsr, Token::Asr]);
+    }
+
+    #[test]
+    fn test_comparison_tokens() {
+        let fixture = TestFixture::load("signed_unsigned_ops");
+        lex_utils::assert_contains_tokens(
+            &fixture,
+            &[
+                Token::Lt,
+                Token::Ult,
+                Token::Div,
+                Token::Udiv,
+                Token::Rem,
+                Token::Urem,
+            ],
+        );
+    }
+
+    #[test]
+    fn test_conversion_tokens() {
+        let fixture = TestFixture::load("float_conversions");
+        lex_utils::assert_contains_tokens(
+            &fixture,
+            &[
+                Token::Fpromote,
+                Token::Fdemote,
+                Token::Itof,
+                Token::Uitof,
+                Token::Ftoi,
+            ],
+        );
+    }
+
+    #[test]
+    fn test_manual_number_parsing() {
         let input = "42 -17 3.14 -2.5e10";
         let mut lexer = Lexer::new(input);
         let tokens = lexer.tokenize().unwrap();
@@ -514,5 +545,14 @@ start:
         assert!(matches!(tokens[1], Token::Int(-17)));
         assert!(matches!(tokens[2], Token::Float(f) if (f - PI).abs() < 0.005));
         assert!(matches!(tokens[3], Token::Float(f) if (f + 2.5e10).abs() < 1e6));
+    }
+
+    #[test]
+    fn test_error_cases() {
+        // Test unterminated string
+        error_utils::assert_lex_error(r#"data @test: [i8; 5] = "hello"#, "Unterminated string");
+
+        // Test unexpected character
+        error_utils::assert_lex_error("fn @test() { $ }", "Unexpected character");
     }
 }

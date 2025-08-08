@@ -1,0 +1,11 @@
+fn @test(%a: i32, %b: i32) -> i32 {
+start:
+    %sum = add.i32 %a, %b
+    %diff = sub.i32 %a, %b
+    br end(%sum, %diff, 10)
+
+end(%x: i32, %y: i32, %z: i32):
+    %result = add.i32 %x, %y
+    %final = add.i32 %result, %z
+    ret %final
+}

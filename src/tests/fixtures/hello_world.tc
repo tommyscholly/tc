@@ -1,0 +1,9 @@
+data @hello_world_z: [i8; 14] = "Hello, World\00"
+
+declare fn @puts(ptr) -> i32
+
+fn @main() -> i32 {
+start:
+    %r = call @puts(@hello_world_z)
+    ret %r
+}

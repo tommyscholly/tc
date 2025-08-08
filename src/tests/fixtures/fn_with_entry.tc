@@ -1,0 +1,5 @@
+fn @foo(%a: i32, %b: i32) -> i32 {
+start:
+    %result = add.i32 %a, %b
+    ret %result
+}

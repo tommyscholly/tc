@@ -1,0 +1,13 @@
+fn @example(%a: i32, %b: i32) -> i32 {
+start:
+    %x = add.i32 %a, %b
+    br loop(%x)
+
+loop(%i: i32):
+    %cond = lt.i32 %i, 10
+    %next = sub.i32 %i, 1
+    brif %cond, loop(%next), end
+
+end:
+    ret %i
+}
