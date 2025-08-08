@@ -334,6 +334,71 @@ impl Parser {
         self.position += 1;
     }
 
+    fn is_instruction_token(&self) -> bool {
+        matches!(self.peek(), Some(Token::Register(_)) | Some(Token::Call))
+    }
+
+    fn is_terminator_token(&self) -> bool {
+        matches!(self.peek(), Some(Token::Ret | Token::Br | Token::Brif))
+    }
+
+    fn is_arithmetic_op(&self, token: &Token) -> bool {
+        matches!(
+            token,
+            Token::Add
+                | Token::Sub
+                | Token::Mul
+                | Token::Div
+                | Token::Udiv
+                | Token::Rem
+                | Token::Urem
+                | Token::And
+                | Token::Or
+                | Token::Xor
+                | Token::Lsl
+                | Token::Lsr
+                | Token::Asr
+                | Token::Neg
+        )
+    }
+
+    fn is_memory_op(&self, token: &Token) -> bool {
+        matches!(token, Token::Load | Token::Alloc)
+    }
+
+    fn is_compare_op(&self, token: &Token) -> bool {
+        matches!(
+            token,
+            Token::Eq
+                | Token::Ne
+                | Token::Lt
+                | Token::Le
+                | Token::Gt
+                | Token::Ge
+                | Token::Ult
+                | Token::Ule
+                | Token::Ugt
+                | Token::Uge
+        )
+    }
+
+    fn is_convert_op(&self, token: &Token) -> bool {
+        matches!(
+            token,
+            Token::Sext
+                | Token::Zext
+                | Token::Trunc
+                | Token::Itof
+                | Token::Uitof
+                | Token::Ftoi
+                | Token::Fpromote
+                | Token::Fdemote
+                | Token::Ptoi
+                | Token::Itop
+                | Token::Bitcast
+        )
+    }
+
     fn expect_token(&mut self, expected: Token) -> Result<()> {
         let actual = self.peek().ok_or(anyhow!("Unexpected end of file"))?;
         if actual == &expected {
@@ -565,14 +630,9 @@ impl Parser {
 
     fn insts(&mut self) -> Result<Vec<Instruction>> {
         let mut instructions = Vec::new();
-        loop {
-            let inst = self.inst();
-            if let Ok(inst) = inst {
-                instructions.push(inst);
-            } else {
-                println!("inst: {:?}", inst);
-                break;
-            }
+
+        while self.is_instruction_token() {
+            instructions.push(self.inst()?);
         }
 
         Ok(instructions)
@@ -624,70 +684,71 @@ impl Parser {
                     ));
                 };
 
-                let tok_peek = self.peek().ok_or(anyhow!("Unexpected end of file"))?;
-                if let Ok(op) = ArithOp::from_token(tok_peek) {
-                    self.advance();
-                    let ty = self.type_annotation()?;
-                    let operands = self.operands(op.num_operands())?;
-
-                    #[deny(clippy::implicit_return)]
-                    return Ok(Instruction::Arith {
-                        dest: reg,
-                        op,
-                        ty: ty.unwrap_or(BaseType::I32),
-                        operands,
-                    });
-                } else if let Ok(op) = MemOp::from_token(tok_peek) {
-                    self.advance();
-                    let ty = self.type_annotation()?;
-                    let operands = self.operands(op.num_operands())?;
-
-                    return Ok(Instruction::Memory {
-                        dest: Some(reg),
-                        op,
-                        ty: ty.unwrap_or(BaseType::I32),
-                        operands,
-                    });
-                } else if let Ok(op) = CmpOp::from_token(tok_peek) {
-                    self.advance();
-                    let ty = self.type_annotation()?;
-                    let mut left_right = self.operands(2)?;
-                    let right = left_right.pop().unwrap();
-                    let left = left_right.pop().unwrap();
-
-                    return Ok(Instruction::Compare {
-                        dest: reg,
-                        op,
-                        ty: ty.unwrap_or(BaseType::I32),
-                        left,
-                        right,
-                    });
-                } else if let Ok(op) = ConvOp::from_token(tok_peek) {
-                    self.advance();
-                    let ty = self.type_annotation()?;
-                    let operand = self.operands(1)?.pop().unwrap();
-
-                    return Ok(Instruction::Convert {
-                        dest: reg,
-                        op,
-                        dest_ty: ty.unwrap_or(BaseType::I32),
-                        operand,
-                    });
-                } else {
-                    // avoid immutable + mutable borrow
-                    let tok_peek = tok_peek.clone();
-                    if let Ok(call) = self.call(Some(reg)) {
-                        return Ok(call);
-                    } else {
-                        return Err(anyhow!(
-                            "Expected arithmetic, memory, compare, or convert operation, got {:?}",
-                            tok_peek
-                        ));
-                    }
-                }
+                self.parse_operation_instruction(reg)
             }
             Token::Call => self.call(None),
-            _ => Err(anyhow!("Unhandled")),
+            _ => Err(anyhow!("Expected instruction token, got {:?}", self.peek())),
+        }
+    }
+
+    fn parse_operation_instruction(&mut self, dest: String) -> Result<Instruction> {
+        let token = self.peek().ok_or(anyhow!("Unexpected end of file"))?;
+
+        match token {
+            token if self.is_arithmetic_op(token) => {
+                let op = ArithOp::from_token(token)?;
+                self.advance();
+                let ty = self.type_annotation()?.unwrap_or(BaseType::I32);
+                let operands = self.operands(op.num_operands())?;
+                Ok(Instruction::Arith {
+                    dest,
+                    op,
+                    ty,
+                    operands,
+                })
+            }
+            token if self.is_memory_op(token) => {
+                let op = MemOp::from_token(token)?;
+                self.advance();
+                let ty = self.type_annotation()?.unwrap_or(BaseType::I32);
+                let operands = self.operands(op.num_operands())?;
+                Ok(Instruction::Memory {
+                    dest: Some(dest),
+                    op,
+                    ty,
+                    operands,
+                })
+            }
+            token if self.is_compare_op(token) => {
+                let op = CmpOp::from_token(token)?;
+                self.advance();
+                let ty = self.type_annotation()?.unwrap_or(BaseType::I32);
+                let mut operands = self.operands(2)?;
+                let right = operands.pop().unwrap();
+                let left = operands.pop().unwrap();
+                Ok(Instruction::Compare {
+                    dest,
+                    op,
+                    ty,
+                    left,
+                    right,
+                })
+            }
+            token if self.is_convert_op(token) => {
+                let op = ConvOp::from_token(token)?;
+                self.advance();
+                let ty = self.type_annotation()?.unwrap_or(BaseType::I32);
+                let operand = self.operands(1)?.pop().unwrap();
+                Ok(Instruction::Convert {
+                    dest,
+                    op,
+                    dest_ty: ty,
+                    operand,
+                })
+            }
+            Token::Call => self.call(Some(dest)),
+
+            _ => Err(anyhow!("Expected operation, got {:?}", token)),
         }
     }
 
