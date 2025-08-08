@@ -102,7 +102,7 @@ BRANCH_TARGET ::= IDENT ( '(' BRANCH_PARAM (',' BRANCH_PARAM)* ')' )?
 
 TERM ::=
     'br' BRANCH_TARGET
-    'brif' VALUE BRANCH_TARGET BRANCH_TARGET # if VALUE, branch to BRANCH_TARGET, else BRANCH_TARGET
+    'brif' VALUE ',' BRANCH_TARGET ',' BRANCH_TARGET # if VALUE, branch to BRANCH_TARGET, else BRANCH_TARGET
     'ret' (VALUE)?
 
 ```
@@ -155,6 +155,8 @@ Both expect a register that contains a pointer to an addressable memory location
 - `load.(i8|i32|i64|f32|f64) VALUE`
     - Returns the value at the address pointed to by the pointer.
 - `store.(i8|i32|i64|f32|f64) VALUE, VALUE`
+    - Stores the value at the address pointed to by the pointer.
+    - The pointer is the first operand, and the value is the second operand.
 
 We also support stack allocation via the `alloc` instruction. 
 These are annotated with a type that is used to determine the size of the allocation, and the number of elements.
@@ -245,7 +247,7 @@ start:
 loop(%i: i32):
     %cond = lt.i32 %i, 10
     %next = sub.i32 %i, 1
-    brif %cond loop(%next) end
+    brif %cond, loop(%next), end
 
 end:
     ret %i

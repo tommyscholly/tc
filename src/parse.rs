@@ -287,10 +287,17 @@ pub struct ExternFunction {
 }
 
 #[derive(Debug, Clone, PartialEq)]
+pub enum GlobalData {
+    Str(String),
+    Int(i64),
+    Float(f64),
+}
+
+#[derive(Debug, Clone, PartialEq)]
 pub struct DataDef {
     pub name: String,
     pub ty: Type,
-    pub value: String,
+    pub value: GlobalData,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -335,11 +342,10 @@ impl Parser {
     }
 
     fn is_instruction_token(&self) -> bool {
-        matches!(self.peek(), Some(Token::Register(_)) | Some(Token::Call))
-    }
-
-    fn is_terminator_token(&self) -> bool {
-        matches!(self.peek(), Some(Token::Ret | Token::Br | Token::Brif))
+        matches!(
+            self.peek(),
+            Some(Token::Register(_)) | Some(Token::Call) | Some(Token::Store)
+        )
     }
 
     fn is_arithmetic_op(&self, token: &Token) -> bool {
@@ -534,12 +540,36 @@ impl Parser {
         self.expect_token(Token::Colon)?;
         let ty = self.type_decl()?;
         self.expect_token(Token::Equals)?;
-        let Token::String(value) = self.peek().ok_or(anyhow!("Unexpected end of file"))? else {
-            return Err(anyhow!("Expected string, got {:?}", self.peek()));
-        };
-        let value = value.clone();
-        self.advance();
-        Ok(DataDef { name, ty, value })
+        match self.peek().ok_or(anyhow!("Unexpected end of file"))? {
+            Token::String(value) => {
+                let value = value.clone();
+                self.advance();
+                Ok(DataDef {
+                    name,
+                    ty,
+                    value: GlobalData::Str(value),
+                })
+            }
+            Token::Int(value) => {
+                let value = *value;
+                self.advance();
+                Ok(DataDef {
+                    name,
+                    ty,
+                    value: GlobalData::Int(value),
+                })
+            }
+            Token::Float(value) => {
+                let value = *value;
+                self.advance();
+                Ok(DataDef {
+                    name,
+                    ty,
+                    value: GlobalData::Float(value),
+                })
+            }
+            _ => Err(anyhow!("Expected string, got {:?}", self.peek())),
+        }
     }
 
     fn type_params(&mut self) -> Result<Vec<BaseType>> {
@@ -694,13 +724,14 @@ impl Parser {
             if matches!(self.peek(), Some(Token::Comma)) {
                 self.advance();
             } else if let Token::RightParen =
-                self.next().ok_or(anyhow!("Unexpected end of file"))?
+                self.peek().ok_or(anyhow!("Unexpected end of file"))?
             {
                 break;
             } else {
                 return Err(anyhow!("Expected ',' or ')', got {:?}", self.peek()));
             }
         }
+        self.advance();
 
         Ok(call_ops)
     }
@@ -731,6 +762,18 @@ impl Parser {
 
                 self.parse_operation_instruction(reg)
             }
+            Token::Store => {
+                println!("Store");
+                self.advance();
+                let ty = self.type_annotation()?.expect("Expected type annotation");
+                let operands = self.operands(2)?;
+                Ok(Instruction::Memory {
+                    dest: None,
+                    op: MemOp::Store,
+                    ty,
+                    operands,
+                })
+            }
             Token::Call => self.call(None),
             _ => Err(anyhow!("Expected instruction token, got {:?}", self.peek())),
         }
@@ -743,7 +786,7 @@ impl Parser {
             token if self.is_arithmetic_op(token) => {
                 let op = ArithOp::from_token(token)?;
                 self.advance();
-                let ty = self.type_annotation()?.unwrap_or(BaseType::I32);
+                let ty = self.type_annotation()?.expect("Expected type annontation");
                 let operands = self.operands(op.num_operands())?;
                 Ok(Instruction::Arith {
                     dest,
@@ -755,7 +798,7 @@ impl Parser {
             token if self.is_memory_op(token) => {
                 let op = MemOp::from_token(token)?;
                 self.advance();
-                let ty = self.type_annotation()?.unwrap_or(BaseType::I32);
+                let ty = self.type_annotation()?.expect("Expected type annontation");
                 let operands = self.operands(op.num_operands())?;
                 Ok(Instruction::Memory {
                     dest: Some(dest),
@@ -767,7 +810,7 @@ impl Parser {
             token if self.is_compare_op(token) => {
                 let op = CmpOp::from_token(token)?;
                 self.advance();
-                let ty = self.type_annotation()?.unwrap_or(BaseType::I32);
+                let ty = self.type_annotation()?.expect("Expected type annontation");
                 let mut operands = self.operands(2)?;
                 let right = operands.pop().unwrap();
                 let left = operands.pop().unwrap();
@@ -782,13 +825,29 @@ impl Parser {
             token if self.is_convert_op(token) => {
                 let op = ConvOp::from_token(token)?;
                 self.advance();
-                let ty = self.type_annotation()?.unwrap_or(BaseType::I32);
+                let ty = self.type_annotation()?.expect("Expected type annontation");
                 let operand = self.operands(1)?.pop().unwrap();
                 Ok(Instruction::Convert {
                     dest,
                     op,
                     dest_ty: ty,
                     operand,
+                })
+            }
+            Token::Select => {
+                self.advance();
+                let ty = self.type_annotation()?.expect("Expected type annotation");
+                let mut cond_true_false = self.operands(3)?;
+                let false_val = cond_true_false.pop().unwrap();
+                let true_val = cond_true_false.pop().unwrap();
+                let condition = cond_true_false.pop().unwrap();
+
+                Ok(Instruction::Select {
+                    dest,
+                    ty,
+                    condition,
+                    true_val,
+                    false_val,
                 })
             }
             Token::Call => self.call(Some(dest)),
@@ -799,7 +858,11 @@ impl Parser {
 
     fn branch_target(&mut self) -> Result<BranchTarget> {
         let block = self.expect_ident()?;
-        let args = self.call_operands()?;
+        let args = if let Token::LeftParen = self.peek().ok_or(anyhow!("Unexpected end of file"))? {
+            self.call_operands()?
+        } else {
+            Vec::new()
+        };
         Ok(BranchTarget { block, args })
     }
 
@@ -852,7 +915,7 @@ data @hello_world_z: [i8; 14] = "Hello, World\00"
             panic!("Expected data definition");
         };
         assert_eq!(data.name, "hello_world_z");
-        assert_eq!(data.value, "Hello, World\0");
+        assert_eq!(data.value, GlobalData::Str("Hello, World\0".to_string()));
     }
 
     #[test]
@@ -964,7 +1027,7 @@ start:
 
         if let Definition::Data(data) = &program.definitions[0] {
             assert_eq!(data.name, "hello_world_z");
-            assert_eq!(data.value, "Hello, World\0");
+            assert_eq!(data.value, GlobalData::Str("Hello, World\0".to_string()));
         } else {
             panic!("Expected data definition");
         }
@@ -1274,6 +1337,336 @@ end(%i: i32):
             }
         } else {
             panic!("Expected function definition");
+        }
+    }
+
+    #[test]
+    fn test_select_instruction() {
+        let input = r#"
+fn @test_select(%cond: i32, %a: i32, %b: i32) -> i32 {
+start:
+    %result = select.i32 %cond, %a, %b
+    ret %result
+}
+"#;
+        let lexer = Lexer::new(input);
+        let mut parser = Parser::new(lexer).unwrap();
+        let program = parser.parse().unwrap();
+
+        if let Definition::Function(func) = &program.definitions[0] {
+            let block = &func.blocks[0];
+            if let Instruction::Select {
+                dest,
+                ty,
+                condition,
+                true_val,
+                false_val,
+            } = &block.instructions[0]
+            {
+                assert_eq!(dest, "result");
+                assert_eq!(*ty, BaseType::I32);
+                assert_eq!(*condition, Value::Register("cond".to_string()));
+                assert_eq!(*true_val, Value::Register("a".to_string()));
+                assert_eq!(*false_val, Value::Register("b".to_string()));
+            } else {
+                panic!("Expected select instruction");
+            }
+        }
+    }
+
+    #[test]
+    fn test_store_instruction() {
+        let input = r#"
+fn @test_store() {
+start:
+    %ptr = alloc.i32 1
+    %val = add.i32 10, 20
+    store.i32 %ptr, %val
+    ret
+}
+"#;
+        let lexer = Lexer::new(input);
+        let mut parser = Parser::new(lexer).unwrap();
+        let program = parser.parse().unwrap();
+
+        if let Definition::Function(func) = &program.definitions[0] {
+            let block = &func.blocks[0];
+
+            if let Instruction::Memory {
+                dest,
+                op,
+                ty,
+                operands,
+            } = &block.instructions[0]
+            {
+                assert_eq!(dest, &Some("ptr".to_string()));
+                assert_eq!(*op, MemOp::Alloc);
+                assert_eq!(*ty, BaseType::I32);
+                assert_eq!(operands, &vec![Value::Int(1)]);
+            }
+
+            // (address first, then value)
+            if let Instruction::Memory {
+                dest,
+                op,
+                ty,
+                operands,
+            } = &block.instructions[2]
+            {
+                assert_eq!(*dest, None);
+                assert_eq!(*op, MemOp::Store);
+                assert_eq!(*ty, BaseType::I32);
+                assert_eq!(operands[0], Value::Register("ptr".to_string())); // address
+                assert_eq!(operands[1], Value::Register("val".to_string())); // value
+            }
+        }
+    }
+
+    #[test]
+    fn test_complex_block_parameters() {
+        let input = r#"
+fn @fibonacci(%n: i32) -> i32 {
+start:
+    %is_base = le.i32 %n, 1
+    brif %is_base, base(%n), recurse(%n)
+
+base(%val: i32):
+    ret %val
+
+recurse(%n: i32):
+    %n_minus_1 = sub.i32 %n, 1
+    %n_minus_2 = sub.i32 %n, 2
+    %fib1 = call @fibonacci(%n_minus_1)
+    %fib2 = call @fibonacci(%n_minus_2)
+    %result = add.i32 %fib1, %fib2
+    ret %result
+}
+"#;
+        let lexer = Lexer::new(input);
+        let mut parser = Parser::new(lexer).unwrap();
+        let program = parser.parse().unwrap();
+
+        if let Definition::Function(func) = &program.definitions[0] {
+            assert_eq!(func.blocks.len(), 3);
+
+            if let Terminator::BranchIf(condition, true_target, false_target) =
+                &func.blocks[0].terminator
+            {
+                assert_eq!(*condition, Value::Register("is_base".to_string()));
+                assert_eq!(true_target.block, "base");
+                assert_eq!(true_target.args.len(), 1);
+                assert_eq!(false_target.block, "recurse");
+                assert_eq!(false_target.args.len(), 1);
+            }
+        }
+    }
+
+    #[test]
+    fn test_shift_operations() {
+        let input = r#"
+fn @test_shifts(%val: i32, %amount: i32) {
+start:
+    %left_shift = lsl.i32 %val, %amount
+    %right_shift = lsr.i32 %val, %amount
+    %arith_shift = asr.i32 %val, %amount
+    ret
+}
+"#;
+        let lexer = Lexer::new(input);
+        let mut parser = Parser::new(lexer).unwrap();
+        let program = parser.parse().unwrap();
+
+        if let Definition::Function(func) = &program.definitions[0] {
+            let block = &func.blocks[0];
+            let expected_ops = [ArithOp::Lsl, ArithOp::Lsr, ArithOp::Asr];
+
+            for (i, expected_op) in expected_ops.iter().enumerate() {
+                if let Instruction::Arith { op, operands, .. } = &block.instructions[i] {
+                    assert_eq!(op, expected_op);
+                    assert_eq!(operands.len(), 2);
+                    assert_eq!(operands[0], Value::Register("val".to_string()));
+                    assert_eq!(operands[1], Value::Register("amount".to_string()));
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn test_mixed_global_register_literal_operands() {
+        let input = r#"
+data @constant: i32 = 42
+
+fn @test_mixed(%param: i32) {
+start:
+    %result1 = add.i32 %param, @constant
+    %result2 = add.i32 @constant, 100
+    %result3 = mul.i32 %param, 5
+    ret
+}
+"#;
+        let lexer = Lexer::new(input);
+        let mut parser = Parser::new(lexer).unwrap();
+        let program = parser.parse().unwrap();
+
+        if let Definition::Function(func) = &program.definitions[1] {
+            let block = &func.blocks[0];
+
+            // register + global
+            if let Instruction::Arith { operands, .. } = &block.instructions[0] {
+                assert_eq!(operands[0], Value::Register("param".to_string()));
+                assert_eq!(operands[1], Value::Global("constant".to_string()));
+            }
+
+            // global + literal
+            if let Instruction::Arith { operands, .. } = &block.instructions[1] {
+                assert_eq!(operands[0], Value::Global("constant".to_string()));
+                assert_eq!(operands[1], Value::Int(100));
+            }
+
+            // register + literal
+            if let Instruction::Arith { operands, .. } = &block.instructions[2] {
+                assert_eq!(operands[0], Value::Register("param".to_string()));
+                assert_eq!(operands[1], Value::Int(5));
+            }
+        }
+    }
+
+    #[test]
+    fn test_signed_vs_unsigned_operations() {
+        let input = r#"
+fn @test_signed_unsigned(%a: i32, %b: i32) {
+start:
+    %div_signed = div.i32 %a, %b
+    %div_unsigned = udiv.i32 %a, %b
+    %rem_signed = rem.i32 %a, %b
+    %rem_unsigned = urem.i32 %a, %b
+    %cmp_signed = lt.i32 %a, %b
+    %cmp_unsigned = ult.i32 %a, %b
+    ret
+}
+"#;
+        let lexer = Lexer::new(input);
+        let mut parser = Parser::new(lexer).unwrap();
+        let program = parser.parse().unwrap();
+
+        if let Definition::Function(func) = &program.definitions[0] {
+            let block = &func.blocks[0];
+
+            let expected_arith_ops = [ArithOp::Div, ArithOp::Udiv, ArithOp::Rem, ArithOp::Urem];
+            let expected_cmp_ops = [CmpOp::Lt, CmpOp::Ult];
+
+            for (i, expected_op) in expected_arith_ops.iter().enumerate() {
+                if let Instruction::Arith { op, .. } = &block.instructions[i] {
+                    assert_eq!(op, expected_op);
+                }
+            }
+
+            for (i, expected_op) in expected_cmp_ops.iter().enumerate() {
+                if let Instruction::Compare { op, .. } = &block.instructions[4 + i] {
+                    assert_eq!(op, expected_op);
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn test_float_promotion_demotion() {
+        let input = r#"
+fn @test_float_conversions(%f32_val: f32, %f64_val: f64) {
+start:
+    %promoted = fpromote.f64 %f32_val
+    %demoted = fdemote.f32 %f64_val
+    ret
+}
+"#;
+        let lexer = Lexer::new(input);
+        let mut parser = Parser::new(lexer).unwrap();
+        let program = parser.parse().unwrap();
+
+        if let Definition::Function(func) = &program.definitions[0] {
+            let block = &func.blocks[0];
+
+            if let Instruction::Convert { op, dest_ty, .. } = &block.instructions[0] {
+                assert_eq!(*op, ConvOp::Fpromote);
+                assert_eq!(*dest_ty, BaseType::F64);
+            }
+
+            if let Instruction::Convert { op, dest_ty, .. } = &block.instructions[1] {
+                assert_eq!(*op, ConvOp::Fdemote);
+                assert_eq!(*dest_ty, BaseType::F32);
+            }
+        }
+    }
+
+    #[test]
+    fn test_pointer_integer_conversions() {
+        let input = r#"
+fn @test_ptr_conversions(%ptr_val: ptr, %int_val: i64) {
+start:
+    %ptr_to_int = ptoi.i64 %ptr_val
+    %int_to_ptr = itop.i64 %int_val
+    ret
+}
+"#;
+        let lexer = Lexer::new(input);
+        let mut parser = Parser::new(lexer).unwrap();
+        let program = parser.parse().unwrap();
+
+        if let Definition::Function(func) = &program.definitions[0] {
+            let block = &func.blocks[0];
+
+            if let Instruction::Convert { op, dest_ty, .. } = &block.instructions[0] {
+                assert_eq!(*op, ConvOp::Ptoi);
+                assert_eq!(*dest_ty, BaseType::I64);
+            }
+
+            if let Instruction::Convert { op, .. } = &block.instructions[1] {
+                assert_eq!(*op, ConvOp::Itop);
+            }
+        }
+    }
+
+    #[test]
+    fn test_empty_blocks_and_calls() {
+        let input = r#"
+declare fn @no_params() -> i32
+declare fn @void_func()
+
+fn @test() {
+start:
+    %val1 = call @no_params()
+    call @void_func()
+    br end
+end:
+    ret
+}
+"#;
+        let lexer = Lexer::new(input);
+        let mut parser = Parser::new(lexer).unwrap();
+        let program = parser.parse().unwrap();
+
+        if let Definition::Function(func) = &program.definitions[2] {
+            let block = &func.blocks[0];
+
+            if let Instruction::Call {
+                dest,
+                function,
+                args,
+            } = &block.instructions[0]
+            {
+                assert_eq!(dest, &Some("val1".to_string()));
+                assert_eq!(function, "no_params");
+                assert!(args.is_empty());
+            }
+
+            if let Terminator::Branch(target) = &block.terminator {
+                assert_eq!(target.block, "end");
+                assert!(target.args.is_empty());
+            }
+
+            let end_block = &func.blocks[1];
+            assert_eq!(end_block.name, "end");
+            assert!(end_block.params.is_empty());
         }
     }
 }
