@@ -1,3 +1,4 @@
+use anyhow::{Result, anyhow};
 use std::fmt;
 
 #[derive(Debug, Clone, PartialEq)]
@@ -93,7 +94,6 @@ pub enum Token {
 
     // Special
     Comment(String),
-    Newline,
     Eof,
 }
 
@@ -143,7 +143,7 @@ impl Lexer {
 
     fn skip_whitespace(&mut self) {
         while let Some(ch) = self.current_char {
-            if ch.is_whitespace() && ch != '\n' {
+            if ch.is_whitespace() {
                 self.advance();
             } else {
                 break;
@@ -151,7 +151,7 @@ impl Lexer {
         }
     }
 
-    fn read_string(&mut self) -> Result<String, String> {
+    fn read_string(&mut self) -> Result<String> {
         let mut result = String::new();
         self.advance(); // Skip opening quote
 
@@ -178,7 +178,7 @@ impl Lexer {
                             }
                         }
                         Some(c) => result.push(c),
-                        None => return Err("Unterminated string escape".to_string()),
+                        None => return Err(anyhow!("Unterminated string escape")),
                     }
                     self.advance();
                 }
@@ -189,7 +189,7 @@ impl Lexer {
             }
         }
 
-        Err("Unterminated string".to_string())
+        Err(anyhow!("Unterminated string"))
     }
 
     fn read_number(&mut self) -> Token {
@@ -342,15 +342,11 @@ impl Lexer {
         }
     }
 
-    pub fn next_token(&mut self) -> Result<Token, String> {
+    pub fn next_token(&mut self) -> Result<Token> {
         self.skip_whitespace();
 
         match self.current_char {
             None => Ok(Token::Eof),
-            Some('\n') => {
-                self.advance();
-                Ok(Token::Newline)
-            }
             Some('(') => {
                 self.advance();
                 Ok(Token::LeftParen)
@@ -403,7 +399,7 @@ impl Lexer {
                 } else if self.peek().is_some_and(|c| c.is_ascii_digit()) {
                     return Ok(self.read_number());
                 } else {
-                    return Err("Unexpected character: -".to_string());
+                    return Err(anyhow!("Unexpected character: -"));
                 }
             }
             Some('@') => {
@@ -435,11 +431,11 @@ impl Lexer {
                 let ident = self.read_identifier();
                 Ok(self.keyword_or_ident(&ident))
             }
-            Some(ch) => Err(format!("Unexpected character: {}", ch)),
+            Some(ch) => Err(anyhow!("Unexpected character: {}", ch)),
         }
     }
 
-    pub fn tokenize(&mut self) -> Result<Vec<Token>, String> {
+    pub fn tokenize(&mut self) -> Result<Vec<Token>> {
         let mut tokens = Vec::new();
 
         loop {
@@ -479,6 +475,7 @@ start:
         let mut lexer = Lexer::new(input);
         let tokens = lexer.tokenize().unwrap();
 
+        println!("{:?}", tokens);
         assert!(tokens.contains(&Token::Data));
         assert!(tokens.contains(&Token::Global("hello_world_z".to_string())));
         assert!(tokens.contains(&Token::String("Hello, World\0".to_string())));
